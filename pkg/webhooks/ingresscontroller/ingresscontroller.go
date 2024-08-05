@@ -2,12 +2,14 @@ package ingresscontroller
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/managed-cluster-validating-webhooks/pkg/webhooks/utils"
+	admissionv1 "k8s.io/api/admission/v1"
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -149,10 +151,80 @@ func (wh *IngressControllerWebhook) authorized(request admissionctl.Request) adm
 		}
 	}
 
+	reqOp := request.AdmissionRequest.Operation
+	//TODO: ONLY check for privatelink clusters? ...any other cluster type this should apply to?
+	// 		What other specifics should be checked here for this cidr check to be applicable?m
+	// privateLink, err := someGetPrivateLinkFunction()
+	// if !privateLink {
+
+	// Only check for machine cidr in allowed ranges if creating or updating resource...
+	if reqOp == admissionv1.Create || reqOp == admissionv1.Update {
+		//TODO: Will these need to iterate over more than just the default IngressController config?
+		if ic.ObjectMeta.Name == "default" && ic.ObjectMeta.Namespace == "openshift-ingress-operator" {
+			//TODO: replace with machine cidr value provided by daemonset ...tbd...
+			//machineCIDRString, err := someGetCIDRFunction()
+			machineCIDRString := "10.0.0.0/16"
+			log.Info("Matt: Warning using HARDCODED machine CIDR only use this code for TESTING!!!", "cidr", machineCIDRString)
+			allowsMachineCidr, ret := wh.checkAllowsMachineCIDR(ic.Spec.EndpointPublishingStrategy.LoadBalancer.AllowedSourceRanges, machineCIDRString)
+			if !allowsMachineCidr {
+				log.Info("Error checking minimum AllowedSourceRange", "err", ret.AdmissionResponse.String())
+				ret.UID = request.AdmissionRequest.UID
+				return ret
+			}
+		}
+	}
+	// } // TODO: end privatelink and cluster checks
+
+	log.Info("############# Matt LOG: IngressController operation is allowed ###########")
 	ret = admissionctl.Allowed("IngressController operation is allowed")
 	ret.UID = request.AdmissionRequest.UID
 
 	return ret
+}
+
+func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1.CIDR, machineCIDRString string) (bool, admissionctl.Response) {
+	// TODO: How is an empty list interpreted? allowing all or allowing no networks?
+	// https://docs.openshift.com/container-platform/4.13/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-load-balancer-allowed-source-ranges.html
+	// From docs it appears a missing ASR value/attr allows all, but a deleted ASR can break things going forward.
+	// For now return Allowed with a warning?
+	if ipRanges == nil || len(ipRanges) <= 0 {
+		return true, admissionctl.Allowed("Allowing empty 'AllowedSourceRanges'. Populate this value if operator remains in 'progressing' state")
+		//return false, admissionctl.Denied("Spec.EndpointPublishingStrategy.LoadBalancer.AllowedSourceRanges must contain machine cidr")
+	}
+	if len(machineCIDRString) <= 0 {
+		return false, admissionctl.Errored(http.StatusInternalServerError, fmt.Errorf("machine CIDR string not provided to AllowedSourceRanges min check. BUG!?! "))
+	}
+	machIP, machNet, err := net.ParseCIDR(string(machineCIDRString))
+	if err != nil {
+		return false, admissionctl.Errored(http.StatusInternalServerError, fmt.Errorf("failed to parse machine CIDR value: '%s'. Err: %s", string(machineCIDRString), err))
+	}
+	machNetSize, machNetBits := machNet.Mask.Size()
+	log.Info(fmt.Sprintf("Checking masks. mach bits:'%d', machsize:%d", machNetBits, machNetSize))
+	for _, ASRstring := range ipRanges {
+		log.Info(fmt.Sprintf("Checking allowed source:'%s'", ASRstring))
+		if len(ASRstring) <= 0 {
+			continue
+		}
+		_, ASRNet, err := net.ParseCIDR(string(ASRstring))
+		if err != nil {
+			log.Info(fmt.Sprintf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
+			return false, admissionctl.Errored(http.StatusBadRequest, fmt.Errorf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
+		}
+		// First check if AlloweSourceRange contains the machine cidr ip...
+		if !ASRNet.Contains(machIP) {
+			log.Info(fmt.Sprintf("AllowedSourceRange:'%s' does not contain machine CIDR:'%s'", ASRstring, machineCIDRString))
+			continue
+		}
+		// Check if the mask includes the network.
+		ASRNetSize, ASRNetBits := ASRNet.Mask.Size()
+		log.Info(fmt.Sprintf("Checking masks. ASR bits:'%d', ASRsize:%d", ASRNetBits, ASRNetSize))
+		if machNetBits == ASRNetBits && ASRNetSize <= machNetSize {
+			log.Info(fmt.Sprintf("Found machineCidr:'%s' within AllowedSourceRange:'%s'", machineCIDRString, ASRstring))
+			return true, admissionctl.Allowed("Minimum allowed source CIDR range checks met")
+		}
+		log.Info(fmt.Sprintf("NOT IN SUBNET machineCidr:'%s' within AllowedSourceRange:'%s'", machineCIDRString, ASRstring))
+	}
+	return false, admissionctl.Denied(fmt.Sprintf("At least one AllowedSourceRange must allow machine cidr:'%s'", machineCIDRString))
 }
 
 // isAllowedUser checks if the user is allowed to perform the action

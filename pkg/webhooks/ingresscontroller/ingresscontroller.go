@@ -275,16 +275,18 @@ func (wh *IngressControllerWebhook) getClusterConfig() (*installConfig, error) {
 }
 
 func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1.CIDR) (bool, admissionctl.Response) {
-	// TODO: How is an empty list interpreted? allowing all or allowing no networks?
 	// https://docs.openshift.com/container-platform/4.13/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-load-balancer-allowed-source-ranges.html
-	// From docs it appears a missing ASR value/attr allows all, but a deleted ASR can break things going forward.
+	// Note: From docs it appears a missing ASR value/attr allows all. However...
+	// once ASR values have been added to an ingresscontroller, later deleting all the ASRs can expose an issue
+	// where the IGC will remaining in progressing state indefinitely.
 	// For now return Allowed with a warning?
 	if ipRanges == nil || len(ipRanges) <= 0 {
 		return true, admissionctl.Allowed("Allowing empty 'AllowedSourceRanges'. Populate this value if operator remains in 'progressing' state")
-		//return false, admissionctl.Denied("Spec.EndpointPublishingStrategy.LoadBalancer.AllowedSourceRanges must contain machine cidr")
 	}
 	machIP, machNet, err := wh.getMachineCIDR()
 	if err != nil {
+		// This represents a fault in either the webhook itself, webhook permissions, or install config.
+		// Might be nice to have an env var etc we can set to proceed w/o the immediate need to roll new code?
 		return false, admissionctl.Errored(http.StatusInternalServerError, err)
 	}
 	machNetSize, machNetBits := machNet.Mask.Size()
@@ -296,6 +298,7 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 		if len(ASRstring) <= 0 {
 			continue
 		}
+		// Parse the Allow Source Range Cidr into network structures...
 		_, ASRNet, err := net.ParseCIDR(ASRstring)
 		if err != nil {
 			log.Info(fmt.Sprintf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
@@ -303,19 +306,19 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 		}
 		// First check if AlloweSourceRange contains the machine cidr ip...
 		if !ASRNet.Contains(machIP) {
-			log.Info(fmt.Sprintf("AllowedSourceRange:'%s' does not contain machine CIDR:'%s/%s'", ASRstring, machIP.String(), machNet.Mask.String()))
+			log.Info(fmt.Sprintf("AllowedSourceRange:'%s' does not contain machine CIDR:'%s/%d'", ASRstring, machIP.String(), machNetSize))
 			continue
 		}
 		// Check if the mask includes the network.
 		ASRNetSize, ASRNetBits := ASRNet.Mask.Size()
 		log.Info(fmt.Sprintf("Checking masks. ASR bits:'%d', ASRsize:%d", ASRNetBits, ASRNetSize))
 		if machNetBits == ASRNetBits && ASRNetSize <= machNetSize {
-			log.Info(fmt.Sprintf("Found machineCidr:'%s/%s' within AllowedSourceRange:'%s'", machIP.String(), machNet.Mask.String(), ASRstring))
+			log.Info(fmt.Sprintf("Found machineCidr:'%s/%d' within AllowedSourceRange:'%s'", machIP.String(), machNetSize, ASRstring))
 			return true, admissionctl.Allowed("IngressController operation is allowed. Minimum AllowedSourceRanges are met.")
 		}
-		log.Info(fmt.Sprintf("NOT IN SUBNET machineCidr:'%s/%s' within AllowedSourceRange:'%s'", machIP.String(), machNet.Mask.String(), ASRstring))
+		log.Info(fmt.Sprintf("NOT IN SUBNET machineCidr:'%s/%d' within AllowedSourceRange:'%s'", machIP.String(), machNetSize, ASRstring))
 	}
-	return false, admissionctl.Denied(fmt.Sprintf("At least one AllowedSourceRange must allow machine cidr:'%s/%s'", machIP.String(), machNet.Mask.String()))
+	return false, admissionctl.Denied(fmt.Sprintf("At least one AllowedSourceRange must allow machine cidr:'%s/%d'", machIP.String(), machNetSize))
 }
 
 // isAllowedUser checks if the user is allowed to perform the action

@@ -290,6 +290,7 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 		return false, admissionctl.Errored(http.StatusInternalServerError, err)
 	}
 	machNetSize, machNetBits := machNet.Mask.Size()
+	log.Info(fmt.Sprintf("Checking machineCidr:'%s/%d' in  AllowedSourceRanges:'%v'", machIP.String(), machNetSize, ipRanges))
 	log.Info(fmt.Sprintf("Checking masks. mach bits:'%d', machsize:%d", machNetBits, machNetSize))
 	for _, OpV1CIDR := range ipRanges {
 		// Clean up the operatorV1.CIDR value into trimmed CIDR 'a.b.c.d/x' string
@@ -304,20 +305,20 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 			log.Info(fmt.Sprintf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
 			return false, admissionctl.Errored(http.StatusBadRequest, fmt.Errorf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
 		}
-		// First check if AlloweSourceRange contains the machine cidr ip...
+		// First check if this AlloweSourceRange entry network contains the machine cidr ip...
 		if !ASRNet.Contains(machIP) {
 			log.Info(fmt.Sprintf("AllowedSourceRange:'%s' does not contain machine CIDR:'%s/%d'", ASRstring, machIP.String(), machNetSize))
 			continue
 		}
-		// Check if the mask includes the network.
+		// Check if this AlloweSourceRange entry mask includes the network.
 		ASRNetSize, ASRNetBits := ASRNet.Mask.Size()
 		log.Info(fmt.Sprintf("Checking masks. ASR bits:'%d', ASRsize:%d", ASRNetBits, ASRNetSize))
 		if machNetBits == ASRNetBits && ASRNetSize <= machNetSize {
 			log.Info(fmt.Sprintf("Found machineCidr:'%s/%d' within AllowedSourceRange:'%s'", machIP.String(), machNetSize, ASRstring))
 			return true, admissionctl.Allowed("IngressController operation is allowed. Minimum AllowedSourceRanges are met.")
 		}
-		log.Info(fmt.Sprintf("NOT IN SUBNET machineCidr:'%s/%d' within AllowedSourceRange:'%s'", machIP.String(), machNetSize, ASRstring))
 	}
+	log.Info(fmt.Sprintf("machineCidr:'%s/%d' not found within networks provided by AllowedSourceRanges:'%v'", machIP.String(), machNetSize, ipRanges))
 	return false, admissionctl.Denied(fmt.Sprintf("At least one AllowedSourceRange must allow machine cidr:'%s/%d'", machIP.String(), machNetSize))
 }
 

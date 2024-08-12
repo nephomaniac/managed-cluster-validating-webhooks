@@ -209,7 +209,7 @@ func (wh *IngressControllerWebhook) getMachineCIDR() (net.IP, *net.IPNet, error)
 	if wh.machineCIDRIP == nil || wh.machineCIDRNet == nil {
 		instConf, err := wh.getClusterConfig()
 		if err != nil {
-			log.Error(err, "Failed to fetch machineCIDR from '%s:%s'", installConfigNamespace, installConfigMap)
+			log.Error(err, "Failed to fetch machineCIDR", "namespace", installConfigNamespace, "configmap", installConfigMap)
 			return nil, nil, err
 		}
 		if instConf == nil {
@@ -224,7 +224,7 @@ func (wh *IngressControllerWebhook) getMachineCIDR() (net.IP, *net.IPNet, error)
 		}
 		machIP, machNet, err := net.ParseCIDR(string(instConf.Networking.MachineCIDR))
 		if err != nil {
-			log.Error(err, "err parsing machineCIDR string:'%s' into network cidr", string(instConf.Networking.MachineCIDR))
+			log.Error(err, "err parsing machineCIDR into network cidr", "machineCIDR", string(instConf.Networking.MachineCIDR))
 			return nil, nil, err
 		}
 		if machIP == nil || machNet == nil {
@@ -286,12 +286,11 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 	machIP, machNet, err := wh.getMachineCIDR()
 	if err != nil {
 		// This represents a fault in either the webhook itself, webhook permissions, or install config.
-		// Might be nice to have an env var etc we can set to proceed w/o the immediate need to roll new code?
+		// Might be nice to have an env var etc we can set to allow proceeding w/o the immediate need to roll new code?
 		return false, admissionctl.Errored(http.StatusInternalServerError, err)
 	}
 	machNetSize, machNetBits := machNet.Mask.Size()
-	log.Info(fmt.Sprintf("Checking machineCidr:'%s/%d' in  AllowedSourceRanges:'%v'", machIP.String(), machNetSize, ipRanges))
-	log.Info(fmt.Sprintf("Checking masks. mach bits:'%d', machsize:%d", machNetBits, machNetSize))
+	log.Info("Checking AllowedSourceRanges", "MachineCIDR", fmt.Sprintf("%s/%d", machIP.String(), machNetSize), "NetBits", machNetBits, "AllowedSourceRanges", ipRanges)
 	for _, OpV1CIDR := range ipRanges {
 		// Clean up the operatorV1.CIDR value into trimmed CIDR 'a.b.c.d/x' string
 		ASRstring := strings.TrimSpace(string(OpV1CIDR))
@@ -299,7 +298,7 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 		if len(ASRstring) <= 0 {
 			continue
 		}
-		// Parse the Allow Source Range Cidr into network structures...
+		// Parse the Allowed Source Range Cidr entry into network structures...
 		_, ASRNet, err := net.ParseCIDR(ASRstring)
 		if err != nil {
 			log.Info(fmt.Sprintf("failed to parse AllowedSourceRanges value: '%s'. Err: %s", string(ASRstring), err))
@@ -312,7 +311,6 @@ func (wh *IngressControllerWebhook) checkAllowsMachineCIDR(ipRanges []operatorv1
 		}
 		// Check if this AlloweSourceRange entry mask includes the network.
 		ASRNetSize, ASRNetBits := ASRNet.Mask.Size()
-		log.Info(fmt.Sprintf("Checking masks. ASR bits:'%d', ASRsize:%d", ASRNetBits, ASRNetSize))
 		if machNetBits == ASRNetBits && ASRNetSize <= machNetSize {
 			log.Info(fmt.Sprintf("Found machineCidr:'%s/%d' within AllowedSourceRange:'%s'", machIP.String(), machNetSize, ASRstring))
 			return true, admissionctl.Allowed("IngressController operation is allowed. Minimum AllowedSourceRanges are met.")

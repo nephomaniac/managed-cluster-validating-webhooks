@@ -9,6 +9,7 @@ import (
 	operatorv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/managed-cluster-validating-webhooks/pkg/testutils"
 	admissionv1 "k8s.io/api/admission/v1"
+	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,6 +75,7 @@ func createRawIngressControllerJSON(name string, namespace string, nodeSelector 
 	if err != nil {
 		return "", err
 	}
+	// Allow a nil value to exclude the 'allowedSourceRanges' param from the request.
 	if allowedRanges != nil {
 		ASRString, err := json.Marshal(allowedRanges)
 		if err != nil {
@@ -143,6 +145,8 @@ func runIngressControllerTests(t *testing.T, tests []ingressControllerTestSuites
 			t.Fatalf("Expected no error, got %s", err.Error())
 		}
 		if response.UID == "" {
+			//t.Logf("Request object:'%s'", obj)
+			t.Logf("Response object:'%v'", response)
 			t.Fatalf("No tracking UID associated with the response.")
 		}
 
@@ -595,9 +599,27 @@ func runIngressControllerAllowedSourceRangesTests(t *testing.T, op admissionv1.O
 			shouldBeAllowed: false,
 			errorContains:   "",
 		},
+	}
+	runIngressControllerTests(t, tests)
+}
+
+func TestIngressControllerAllowedSourceRangesCreate(t *testing.T) {
+	// Test the update and create operations in parallel?
+	t.Parallel()
+	runIngressControllerAllowedSourceRangesTests(t, admissionv1.Create)
+}
+
+func TestIngressControllerAllowedSourceRangesUpdate(t *testing.T) {
+	// Test the update and create operations in parallel?
+	t.Parallel()
+	runIngressControllerAllowedSourceRangesTests(t, admissionv1.Update)
+}
+
+func runIngressControllerAllowedSourceRangesNonDefaultTest(t *testing.T, op admissionv1.Operation) {
+	tests := []ingressControllerTestSuites{
 		{
 			testID:              fmt.Sprintf("allowedSourceRanges-test-non-default-exclude-machineCIDR-%s", op),
-			name:                "shiny-new-ingress",
+			name:                "shiny-newingress",
 			namespace:           "openshift-ingress-operator",
 			username:            "admin",
 			userGroups:          []string{"system:authenticated", "cluster-admins"},
@@ -612,9 +634,9 @@ func runIngressControllerAllowedSourceRangesTests(t *testing.T, op admissionv1.O
 			errorContains:   "",
 		},
 		{
-			testID:              fmt.Sprintf("allowedSourceRanges-test-default-non-openshift-ns-exclude-machineCIDR-%s", op),
+			testID:              fmt.Sprintf("allowedSourceRanges-test-non-os-namespace-exclude-machineCIDR-%s", op),
 			name:                "default",
-			namespace:           "my-ingress-operator",
+			namespace:           "shiny-newingress-namespace", //May not be a valid test beyond testing  the webhook.
 			username:            "admin",
 			userGroups:          []string{"system:authenticated", "cluster-admins"},
 			operation:           op,
@@ -631,12 +653,20 @@ func runIngressControllerAllowedSourceRangesTests(t *testing.T, op admissionv1.O
 	runIngressControllerTests(t, tests)
 }
 
-func TestIngressControllerAllowedSourceRangesCreate(t *testing.T) {
-	t.Parallel()
+func TestIngressControllerAllowedSourceRangesNonDefaultCreate(t *testing.T) {
 	runIngressControllerAllowedSourceRangesTests(t, admissionv1.Create)
 }
-
-func TestIngressControllerAllowedSourceRangesUpdate(t *testing.T) {
-	t.Parallel()
+func TestIngressControllerAllowedSourceRangesNonDefaultUpdate(t *testing.T) {
 	runIngressControllerAllowedSourceRangesTests(t, admissionv1.Update)
+}
+func TestIngressControllerCheckDeleteSupport(t *testing.T) {
+	hook := NewWebhook()
+	rules := hook.Rules()
+	for _, rule := range rules {
+		for _, op := range rule.Operations {
+			if op == admissionregv1.OperationType(admissionv1.Delete) {
+				t.Fatalf("IngressController web hook is supporting the Delete operation. Replace this check with unit tests supporting 'Delete'")
+			}
+		}
+	}
 }

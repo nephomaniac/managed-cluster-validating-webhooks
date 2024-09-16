@@ -12,7 +12,6 @@ import (
 
 	operatorv1 "github.com/openshift/api/operator/v1"
 	installer "github.com/openshift/installer/pkg/types"
-
 	"github.com/openshift/managed-cluster-validating-webhooks/pkg/k8sutil"
 	"github.com/openshift/managed-cluster-validating-webhooks/pkg/webhooks/utils"
 	"github.com/pkg/errors"
@@ -345,8 +344,8 @@ func (s *IngressControllerWebhook) ClassicEnabled() bool { return true }
 func (s *IngressControllerWebhook) HypershiftEnabled() bool { return false }
 
 // NewWebhook creates a new webhook
-// Allow variadic args so unit tests can provide optional test params to avoid exiting with err...
-func NewWebhook(testparams ...interface{}) *IngressControllerWebhook {
+// Allow variadic args so unit tests can provide optional test values...
+func NewWebhook(params ...interface{}) *IngressControllerWebhook {
 	scheme := runtime.NewScheme()
 	err := corev1.AddToScheme(scheme)
 	if err != nil {
@@ -356,28 +355,35 @@ func NewWebhook(testparams ...interface{}) *IngressControllerWebhook {
 	wh := &IngressControllerWebhook{
 		s: *scheme,
 	}
-	// As of know only machineCIDR can be provided by tests...
-	if len(testparams) > 0 {
-		param := testparams[0]
+	// TestHooks maps to cli flag 'testhooks' and is used during 'make test' to "test webhook URI uniqueness".
+	// 'make test' does not require this hook to build runtime clients/config at this time...
+	if utils.TestHooks {
+		return wh
+	}
+
+	if len(params) > 0 {
+		param := params[0]
+		// As of know only machineCIDR values can be provided by unit tests...
 		if cidr, ok := param.(*net.IPNet); ok {
 			log.Info(fmt.Sprintf("Got test net.IPNet param network() for machineCIDR:'%s'\n", cidr.Network()))
 			wh.machineCIDRNet = cidr
 		} else {
 			log.Error(fmt.Errorf("invalid test param provided, expected *net.IPNet machineCIDR value"), "invalid test param provided, expected *net.IPNet machineCIDR value")
-			//os.Exit(1)
+			os.Exit(1)
 		}
 	} else {
+		// This is not a test run.
 		// Try to populate machine cidr at init. Exit with error if this fails...
 		instConf, err := wh.getClusterConfig()
 		if err != nil {
 			log.Error(err, "Failed to fetch configmap for machineCIDR", "namespace", installConfigNamespace, "configmap", installConfigMap)
-			//os.Exit(1)
+			os.Exit(1)
 		}
 
 		_, err = wh.getMachineCIDR(instConf)
 		if err != nil || wh.machineCIDRNet == nil {
 			log.Error(err, "Failed to fetch cluster machineCIDR.")
-			//os.Exit(1)
+			os.Exit(1)
 		}
 	}
 	return wh

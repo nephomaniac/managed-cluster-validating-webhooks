@@ -67,6 +67,7 @@ func Register(name string, input WebhookFactory) {
 	// Check for nil func to allow webhooks to avoid use of os.exit() if needed...
 	if input == nil {
 		fmt.Fprintf(os.Stderr, "Warning: WebhookFactory['%s'] provided nil constructor during Register()\n", name)
+	} else {
 		Webhooks[name] = input
 	}
 }

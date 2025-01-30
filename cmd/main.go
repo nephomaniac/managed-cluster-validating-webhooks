@@ -31,10 +31,11 @@ var (
 	listenPort    = flag.String("port", "5000", "port to listen on")
 	metricsAddr   string
 
-	useTLS  = flag.Bool("tls", false, "Use TLS? Must specify -tlskey, -tlscert, -cacert")
-	tlsKey  = flag.String("tlskey", "", "TLS Key for TLS")
-	tlsCert = flag.String("tlscert", "", "TLS Certificate")
-	caCert  = flag.String("cacert", "", "CA Cert file")
+	useTLS            = flag.Bool("tls", false, "Use TLS? Must specify -tlskey, -tlscert, -cacert")
+	tlsKey            = flag.String("tlskey", "", "TLS Key for TLS")
+	tlsCert           = flag.String("tlscert", "", "TLS Certificate")
+	caCert            = flag.String("cacert", "", "CA Cert file")
+	hypershiftEnabled = flag.Bool("hypershift", false, "Hypershift enabled")
 
 	metricsPath = "/metrics"
 	metricsPort = "8080"
@@ -45,6 +46,7 @@ func init() {
 	flag.BoolVar(&utils.TestHooks, "testhooks", false, "Test webhook URI uniqueness and quit?")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":"+metricsPort, "The address the metric endpoint binds to.")
 	flag.Parse()
+	webhooks.HypershiftEnabled = *hypershiftEnabled
 }
 
 func main() {

@@ -5,5 +5,9 @@ import (
 )
 
 func init() {
+	ic := &ingresscontroller.IngressControllerWebhook{}
+	if HypershiftEnabled && !ic.HypershiftEnabled() {
+		return
+	}
 	Register(ingresscontroller.WebhookName, func() Webhook { return ingresscontroller.NewWebhook() })
 }

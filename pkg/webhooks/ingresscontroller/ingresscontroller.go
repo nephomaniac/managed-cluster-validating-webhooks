@@ -336,7 +336,7 @@ func NewWebhook(params ...interface{}) *IngressControllerWebhook {
 	err := corev1.AddToScheme(scheme)
 	if err != nil {
 		log.Error(err, "Fail adding corev1 scheme to IngressControllerWebhook")
-		os.Exit(1)
+		os.Exit(1) //exit here similar to existing webhook pattern
 	}
 	wh := &IngressControllerWebhook{
 		s: *scheme,
@@ -349,14 +349,14 @@ func NewWebhook(params ...interface{}) *IngressControllerWebhook {
 
 	if len(params) > 0 {
 		param := params[0]
-		// As of know only *IPNet values can be provided by unit tests to set machineCIDR, normal webhook factory
+		// As of now only *IPNet values can be provided by unit tests to set machineCIDR, normal webhook factory
 		// calls NewWebhook() without arguments...
 		if cidr, ok := param.(*net.IPNet); ok {
 			log.Info(fmt.Sprintf("Got test net.IPNet param network() for machineCIDR:'%s'\n", cidr.Network()))
 			wh.machineCIDRNet = cidr
 		} else {
 			log.Error(fmt.Errorf("invalid test param provided, expected *net.IPNet machineCIDR value"), "invalid test param provided, expected *net.IPNet machineCIDR value")
-			os.Exit(1)
+			os.Exit(1) //exit test
 		}
 	} else {
 		// This is not a test run.
@@ -364,13 +364,13 @@ func NewWebhook(params ...interface{}) *IngressControllerWebhook {
 		instConf, err := wh.getClusterConfig()
 		if err != nil {
 			log.Error(err, "Failed to fetch configmap for machineCIDR", "namespace", installConfigNamespace, "configmap", installConfigMap)
-			os.Exit(1)
+			//os.Exit(1) // How do we best alert to this fault w/o bringing down the pod?
 		}
 
 		_, err = wh.getMachineCIDR(instConf)
 		if err != nil || wh.machineCIDRNet == nil {
 			log.Error(err, "Failed to fetch cluster machineCIDR.")
-			os.Exit(1)
+			//os.Exit(1) // How do we best alert to this fault w/o bringing down the pod?
 		}
 	}
 	return wh

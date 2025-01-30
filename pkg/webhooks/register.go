@@ -6,6 +6,9 @@ import (
 	admissionctl "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
+// Global flag used for determining which webhooks to register
+var HypershiftEnabled = false
+
 type RegisteredWebhooks map[string]WebhookFactory
 
 // Webhooks are all registered webhooks mapping name to hook

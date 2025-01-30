@@ -565,6 +565,7 @@ func createPackagedDeployment(replicas int32, phase string) *appsv1.Deployment {
 								"-tlskey", "/service-certs/tls.key",
 								"-tlscert", "/service-certs/tls.crt",
 								"-cacert", "/service-ca/service-ca.crt",
+								"-hypershift",
 								"-tls",
 							},
 							Env: []corev1.EnvVar{

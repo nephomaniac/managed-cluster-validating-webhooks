@@ -1,6 +1,9 @@
 package webhooks
 
 import (
+	"fmt"
+	"os"
+
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	admissionctl "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -61,5 +64,9 @@ type WebhookFactory func() Webhook
 
 // Register webhooks
 func Register(name string, input WebhookFactory) {
-	Webhooks[name] = input
+	// Check for nil func to allow webhooks to avoid use of os.exit() if needed...
+	if input == nil {
+		fmt.Fprintf(os.Stderr, "Warning: WebhookFactory['%s'] provided nil constructor during Register()\n", name)
+		Webhooks[name] = input
+	}
 }
